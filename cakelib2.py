@@ -136,7 +136,7 @@ class Chat:
 
     def post(self, msg):
         if len(msg) > 2500:
-            message, rest = msg[:2500], msg[:2500]
+            message, rest = msg[:2500], msg[2500:]
             self.send('bmsg', 'fuck', message)
             self.post(rest)
         else:
@@ -410,3 +410,4 @@ class Main:
     def stop(self):
         self.cake = False
         [x.set() for x in self.tasks]
+        [x.disconnect() for x in self.gConnections()]
