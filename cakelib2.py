@@ -38,63 +38,9 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 version: Sexy (INCOMPLETE)
+
+set _uids and _lastmsg to False for better performance on low end systems
 '''
-
-####
-# constants
-####
-
-uids = dict()
-lastmsg = dict()
-
-def regex(pattern, x, default): return re.search(pattern, x).group(1) if re.search(pattern, x) else default
-def unescape(text): return html.parser.HTMLParser().unescape(text)
-def escape(text): return ''.join(['&#%s;' % ord(x) for x in text])
-
-def call(classname, function, *values):
-    if hasattr(classname, function):
-        getattr(classname, function) (*values)
-
-def server(group):
-    try:  sn = str(specials[group])
-    except KeyError:
-        group = re.sub('[-_]', 'q', group)
-        lcv8 = max(int(group[6:9], 36), 1000) if len(group) > 6  else 1000
-        num = (int(group[:5], 36) % lcv8) / lcv8
-        cake, s_number = 0, 0
-        for x in tagserver_weights:
-          cake += float(x[1]) / sum(a[1] for a in tagserver_weights)
-          if(num <= cake) and s_number == 0:
-            s_number += int(x[0])
-        sn = s_number
-    return "s{}.chatango.com".format(sn)
-
-def Auth(user, password): 
-    data = urllib.parse.urlencode({"user_id": user, "password": password, "storecookie": "on", "checkerrors": "yes"}).encode()
-    return regex('auth.chatango.com=(.*?);', urllib.request.urlopen("http://chatango.com/login", data).getheader('Set-Cookie'), None)
-
-def anon_id(_id, uid):
-    return ''.join([str((
-        int(uid[4:][i][-1]) + int((_id if (_id != None and len(_id) == 4) else '3452')[i][-1])
-        )% 10) for i in range(4)])
-
-def gUser(user, alias, uid, _id):
-    if user == '': user = 'None'
-    if user == 'None':
-        if alias == 'None':
-            user = '@anon'+anon_id(_id, uid)        
-        else: user = '$'+alias
-    return User(**{'name': user.lower(), 'uid': uid})
-
-def clean(msg):
-    font_tag = regex('<f (.*?)>', msg.content, '000')
-    name_tag = regex('<n(.*?)/>', msg.content, '000')
-    msg.user.fSize = regex('x(.*?)=', font_tag, '12')[0:2]
-    msg.user.fColor = regex('x%s(.*?)=' % msg.user.fSize, font_tag, '000')[0:3]
-    msg.user.fFace = regex('="(.*?)"', font_tag, '0')
-    msg.user.nColor = name_tag[0:3]
-    msg.content = unescape(re.sub('<(.*?)>', '', msg.content))
-    return msg
 
 ####
 # cake
@@ -116,13 +62,13 @@ class Chat:
 
     def __init__(self, **kw):
         [setattr(self, x, kw[x]) for x in kw]
-
+        
         self.connect()
 
     def connect(self):
         self.cumsock = socket.socket()
         self.cumsock.connect((self.server, self.port))
-        self.ping = self.main.timer(35, self.main.ping, self)
+        self.ping = self.main.timer(30, self.main.ping, self)
         self.login()
 
     def send(self, *x):
@@ -141,6 +87,63 @@ class Chat:
             self.post(rest)
         else:
             self.send('bmsg', 'fuck', msg)
+
+    def isMod(self, user):
+        if user == self.chatInfo.owner or user in self.chatInfo.mods: return True
+        else: return False
+
+    def gMessage(self, name, index=-1, content = False):
+        try:
+            msg = [x for x in self.chatInfo.history if x.user.name == name][index]
+            if content: return msg.content
+            else: return msg
+        except IndexError: return False
+
+    def gBan(self, name):
+        try: return [x for x in self.chatInfo.banlist if x.user == name][0]
+        except IndexError: return False
+    
+    def ban(self, name):
+        if self.isMod(self.user):
+            info = self.gMessage(name)
+            if info:
+                name = None if name[0] in ['$','@'] else name
+                self.send('block', info.cid, info.ip, name)
+            else: return False
+        else: return False
+
+    def unban(self, user):
+        if self.isMod(self.user):
+            info = self.gBan(user)
+            if info:
+                self.send('removeblock', info.cid, info.ip)
+            else: return False
+        else: return False
+
+    def delete(self, name):
+        info = self.gMessage(name)
+        if info:
+            self.send('delmsg', info.sid)
+            return True
+        else: return False
+
+    def clear(self, name):
+        if self.isMod(self.user):
+            info = self.gMessage(name)
+            if info:
+                self.send('delallmsg', info.cid)
+                return True
+            else: return False
+        else: return False
+        
+    @property
+    def nuke(self):
+        if self.user == self.chatInfo.owner:
+            return self.send('clearall')
+        else: return False
+
+    @property
+    def banlist(self): return [x.user for x in self.chatInfo.banlist]
     
 ####
 # user class
@@ -164,7 +167,7 @@ class Pm:
     def connect(self):
         self.cumsock = socket.socket()
         self.cumsock.connect((self.server, self.port))
-        self.ping = self.main.timer(35, self.main.ping, self)
+        self.ping = self.main.timer(30, self.main.ping, self)
         self.login()
 
     def login(self):
@@ -177,8 +180,7 @@ class Pm:
         self.wbyte += data+byte
 
     def say(self, user, x):
-        self.send('msg', user, x.replace('<', '[').replace('>',']')) 
-      
+        self.send('msg', user, x.replace('<', '[').replace('>',']'))      
 
 ####
 # event handler
@@ -203,7 +205,8 @@ class Interpret:
             'mods': data[6].split(';'),
             'owner': data[0],
             'history': list(),
-            'nomore': 1
+            'banlist': list(),
+            'unbanlist': list()
           })
 
     def _inited(self, data, net):
@@ -249,6 +252,42 @@ class Interpret:
     def _mods(self, data, net):
         net.chatInfo.mods = data
 
+    def _blocklist(self, data, net):
+        net.chatInfo.banlist.clear()
+        data = [x.split('%') for x in '%'.join(data).split(';')]
+        for x in data:
+            if len(x) > 1:
+                ban = newObject(**{
+                    'user': x[2] if x[2] else 'anon',
+                    'cid': x[0],
+                    'ip': x[1],
+                    'banner': x[4],
+                    'time': x[3]
+                  })
+                net.chatInfo.banlist.append(ban)
+
+    def _blocked(self, data, net):
+        ban = newObject(**{
+            'user': data[2] if data[2] else 'anon',
+            'cid': data[0],
+            'ip': data[1],
+            'banner': data[4],
+            'time': data[3]
+          })
+        net.chatInfo.banlist.append(ban)
+
+    def _unblocked(self, data, net):
+        if len(data) == 5:
+            match = [x for x in net.chatInfo.banlist if x.user == data[2]][0]
+            net.chatInfo.banlist.remove(match)
+
+    def _delete(self, data, net):
+        prev = [x for x in net.chatInfo.history if x.sid == data[0]]
+        if prev: net.chatInfo.history.remove(prev[0])
+
+    def _deleteal(self, data, net):
+        pass
+
     def _n(self, data, net):
         net.chatInfo.userCount = int(data[0], 16)
 
@@ -281,17 +320,18 @@ class Interpret:
             'user': gUser(data[1], data[2], data[3], _id),
             'room': net,
             'uid': data[3],
-            'id': data[4],
+            'cid': data[4],
             'time': data[0],
             'ip': data[6],
             'content': ':'.join(data[9:]),
-            'u_id': None
+            'sid': None
             })
         net.Message = clean(msg)
         
     def _u(self, data, net):
-        net.Message.u_id = data[1]
-        lastmsg[net.Message.user.name] = [net.Message.content, net.Message.room.chatname, net.Message.time]
+        net.Message.sid = data[1]
+        net.chatInfo.history.append(net.Message)
+        if _lastmsg: lastmsg[net.Message.user.name] = [net.Message.content, net.Message.room.chatname, net.Message.time]
         call(self.main, 'onMessage', net.Message.user, net.Message.room, net.Message)
 
     def _msg(self, data, net):
@@ -366,7 +406,7 @@ class Main:
     @classmethod
     def start(bot, user = None, password = None, chats = None, pm = None, debug = False, default = None):
         self = bot()
-        chats = default if debug and defalut != None else chats
+        chats = default if debug and default != None else chats
         if type(chats) == str: chats = chats.split()
         self.user = user
         self.password = password
@@ -381,7 +421,7 @@ class Main:
             'server': 'c1.chatango.com'
             })
           self.connections['pm'] = self.pm
-          threading.Thread(target=self.gLastmsg, daemon = True).start()
+          if _lastmsg: threading.Thread(target=self.gLastmsg, daemon = True).start()
         self.matrix()
 
     def onInit(self):
@@ -405,9 +445,85 @@ class Main:
             for i in write_sock:
                 net = [x for x in connections if x.cumsock == i][0]
                 i.send(net.wbyte)
-                net.wbyte = b''            
+                net.wbyte = b''
 
     def stop(self):
         self.cake = False
         [x.set() for x in self.tasks]
         [x.disconnect() for x in self.gConnections()]
+        return True
+
+####
+# constants
+####
+
+uids = dict()
+lastmsg = dict()
+
+_uids = True
+_lastmsg = True
+
+def regex(pattern, x, default): return re.search(pattern, x).group(1) if re.search(pattern, x) else default
+def unescape(text): return html.parser.HTMLParser().unescape(text)
+def escape(text): return ''.join(['&#%s;' % ord(x) for x in text])
+
+def call(classname, function, *values):
+    if hasattr(classname, function):
+        getattr(classname, function) (*values)
+
+def server(group):
+    try:  sn = str(specials[group])
+    except KeyError:
+        group = re.sub('[-_]', 'q', group)
+        lcv8 = max(int(group[6:9], 36), 1000) if len(group) > 6  else 1000
+        num = (int(group[:5], 36) % lcv8) / lcv8
+        cake, s_number = 0, 0
+        for x in tagserver_weights:
+          cake += float(x[1]) / sum(a[1] for a in tagserver_weights)
+          if(num <= cake) and s_number == 0:
+            s_number += int(x[0])
+        sn = s_number
+    return "s{}.chatango.com".format(sn)
+
+def Auth(user, password): 
+    data = urllib.parse.urlencode({"user_id": user, "password": password, "storecookie": "on", "checkerrors": "yes"}).encode()
+    return regex('auth.chatango.com=(.*?);', urllib.request.urlopen("http://chatango.com/login", data).getheader('Set-Cookie'), None)
+
+def anon_id(_id, uid):
+    return ''.join([str((
+        int(uid[4:][i][-1]) + int((_id if (_id != None and len(_id) == 4) else '3452')[i][-1])
+        )% 10) for i in range(4)])
+
+def gUser(user, alias, uid, _id):
+    if user == '': user = 'None'
+    if user == 'None':
+        if alias == '' or 'None':
+            user = '@anon'+anon_id(_id, uid)        
+        else: user = '$'+alias
+    user = user.lower()
+    if _uids: threading.Thread(target=rUids, args=(uid, user), daemon=True).start()
+    return User(**{'name': user.lower(), 'uid': uid})
+
+def rUids(k, v):
+    key, value = k.lower(), v.lower()    
+    if key not in uids:
+        uids[key] = value
+    else:
+        x = []
+        values = uids[key]
+        x.append(values)
+        if value not in values:
+            x.append(value)
+            x = list(set(x))
+            x = " ".join(str(y) for y in x)
+            uids[key] = x
+
+def clean(msg):
+    font_tag = regex('<f (.*?)>', msg.content, '000')
+    name_tag = regex('<n(.*?)/>', msg.content, '000')
+    msg.user.fSize = regex('x(.*?)=', font_tag, '12')[0:2]
+    msg.user.fColor = regex('x%s(.*?)=' % msg.user.fSize, font_tag, '000')[0:3]
+    msg.user.fFace = regex('="(.*?)"', font_tag, '0')
+    msg.user.nColor = name_tag[0:3]
+    msg.content = unescape(re.sub('<(.*?)>', '', msg.content))
+    return msg
