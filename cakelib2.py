@@ -37,7 +37,7 @@ but WITHOUT ANY WARRANTY; without even the implied warranty of
 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
-version: Sexy (INCOMPLETE)
+version: Sexy (ETERNALLY INCOMPLETE)
 
 set _uids, _fullhistory, and _lastmsg to False for better performance on low end systems
 '''
@@ -85,7 +85,10 @@ class Chat:
         self.ready = False
 
     def post(self, msg):
+        msg = str(msg) if type(msg) == bool else msg
         msg = msg.replace(self.main.password, 'cake')
+        msg = font_parse(msg)
+        print(msg)
         font = '<n%s/><f x%s%s="%s">' % (self.nameColor, self.fontSise, self.fontColor, 0)
         if len(msg) > 2500:
             message, rest = msg[:2500], msg[2500:]            
@@ -113,6 +116,25 @@ class Chat:
             self.send('addmod', user)
             return True
         else: return False
+
+    def getUid(self, args, line):
+        x = []
+        uid, names = line
+        for name in names.split():
+           if name == args:
+               x.append(uid)
+        return x
+
+    def whois(self, string):
+        x = []
+        for key, value in uids.items():
+            uid = key
+            names = value
+            line = [key, value]
+            for xuids in self.getUid(string, line):
+                if xuids == uid:
+                    x.append("%s: %s" % (uid ,names))
+        return '<br /><br />' + '<br />'.join(x)
 
     def unmod(self, user):
         if self.isMod(self.main.user):
@@ -224,7 +246,8 @@ class Interpret:
         self.main = main
 
     def lemonize(self, data, net):
-        data = [x.split(':') for x in data.decode('utf-8').split('\r\n\x00')]
+        #print(data)
+        data = [x.rstrip('\r\n').split(':') for x in data.decode('utf-8').split('\x00')]
         [self.event_call(x[0],x[1:], net) for x in data]
 
     def event_call(self, event, data, net):
@@ -285,6 +308,7 @@ class Interpret:
         net.chatInfo.userlist = [x.user.name for x in net.chatInfo.pData]
 
     def _mods(self, data, net):
+        print(data)
         net.chatInfo.mods = data
 
     def _blocklist(self, data, net):
@@ -364,12 +388,17 @@ class Interpret:
             'sid': None
             })
         net.Message = clean(msg)
+        call(self.main, 'onMessage', net.Message.user, net.Message.room, net.Message)
+
+
         
     def _u(self, data, net):
-        net.Message.sid = data[1]
-        net.chatInfo.history.append(net.Message)
-        if _lastmsg: lastmsg[net.Message.user.name] = [net.Message.content, net.Message.room.chatname, net.Message.time]
-        call(self.main, 'onMessage', net.Message.user, net.Message.room, net.Message)
+        if hasattr(net, 'Message'):
+            net.Message.sid = data[1]
+            net.chatInfo.history.append(net.Message)
+            if _lastmsg: lastmsg[net.Message.user.name] = [net.Message.content, net.Message.room.chatname, net.Message.time]
+            #the chatango updates caused a double u event to occur with this library, not sure why.
+            #call(self.main, 'onMessage', net.Message.user, net.Message.room, net.Message)
 
     def _msg(self, data, net):
         msg = newObject(**{
@@ -406,9 +435,9 @@ class Main:
                 'main': self,
                 'ready': True,
                 'chatInfo': None,
-                'fontColor': 'fff',
-                'nameColor': '00ffff',
-                'fontSise': '11'
+                'fontColor': gfontColor,
+                'nameColor': gnameColor,
+                'fontSise': gfontSise
                 })
             return True
         else: return False
@@ -420,7 +449,7 @@ class Main:
         return [x for x in self.gConnections() if x.cumsock.getpeername()[1] == 443]
 
     def gChat(self, chat):
-        return [x for x in self.gChats if x.chatname == chat.lower()][0]
+        return [x for x in self.gChats() if x.chatname == chat.lower()][0]
 
     def gLastmsg(self):
         time.sleep(10)
@@ -498,6 +527,10 @@ class Main:
 uids = dict()
 lastmsg = dict()
 
+gnameColor = '00ffff'
+gfontSise = '11'
+gfontColor = 'fff'
+
 _uids = True
 _lastmsg = True
 _fullhistory = True
@@ -555,6 +588,17 @@ def rUids(k, v):
             x = list(set(x))
             x = " ".join(str(y) for y in x)
             uids[key] = x
+
+def font_parse(x):
+    #this is temporary untill i can come up with a better method.
+    x = x.replace("<font color='#",'<f x')
+    x = x.replace('">', '="0">')
+    x = x.replace("'>", '="0">')
+    x = x.replace('="0="0">', '="0">')
+    x = x.replace('<font color="#','<f x')
+    x = x.replace('</font>','<f x%s%s="%s">' % (gfontSise, gfontColor, 0))
+    close = '</f>'*x.count('<f x')
+    return x+close
 
 def clean(msg):
     font_tag = regex('<f (.*?)>', msg.content, '000')
